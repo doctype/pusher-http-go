@@ -1,7 +1,6 @@
 package pusher
 
 import (
-	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -51,7 +50,6 @@ type Client struct {
 	Secure              bool   // true for HTTPS
 	Cluster             string
 	HTTPClient          *http.Client
-	EncryptionMasterKey string //for E2E
 }
 
 /*
@@ -168,30 +166,16 @@ func (c *Client) TriggerMultiExclusive(channels []string, eventName string, data
 }
 
 func (c *Client) trigger(channels []string, eventName string, data interface{}, socketID *string) error {
-	hasEncryptedChannel := false
-	for _, channel := range channels {
-		if isEncryptedChannel(channel) {
-			hasEncryptedChannel = true
-		}
-	}
 	if len(channels) > maxTriggerableChannels {
 		return fmt.Errorf("You cannot trigger on more than %d channels at once", maxTriggerableChannels)
-	}
-	if hasEncryptedChannel && len(channels) > 1 {
-		// For rationale, see limitations of end-to-end encryption in the README
-		return errors.New("You cannot trigger to multiple channels when using encrypted channels")
-
 	}
 	if !channelsAreValid(channels) {
 		return errors.New("At least one of your channels' names are invalid")
 	}
-	if hasEncryptedChannel && !validEncryptionKey(c.EncryptionMasterKey) {
-		return errors.New("Your encryptionMasterKey is not of the correct format")
-	}
 	if err := validateSocketID(socketID); err != nil {
 		return err
 	}
-	payload, err := encodeTriggerBody(channels, eventName, data, socketID, c.EncryptionMasterKey)
+	payload, err := encodeTriggerBody(channels, eventName, data, socketID)
 	if err != nil {
 		return err
 	}
@@ -219,11 +203,9 @@ type Event struct {
 TriggerBatch triggers multiple events on multiple channels in a single call:
     client.TriggerBatch([]pusher.Event{
 	    { Channel: "donut-1", Name: "ev1", Data: "d1" },
-	    { Channel: "private-encrypted-secretdonut", Name: "ev2", Data: "d2" },
     })
 */
 func (c *Client) TriggerBatch(batch []Event) error {
-	hasEncryptedChannel := false
 	// validate every channel name and every sockedID (if present) in batch
 	for _, event := range batch {
 		if !validChannel(event.Channel) {
@@ -232,17 +214,9 @@ func (c *Client) TriggerBatch(batch []Event) error {
 		if err := validateSocketID(event.SocketID); err != nil {
 			return err
 		}
-		if isEncryptedChannel(event.Channel) {
-			hasEncryptedChannel = true
-		}
 	}
-	if hasEncryptedChannel {
-		// validate EncryptionMasterKey
-		if !validEncryptionKey(c.EncryptionMasterKey) {
-			return errors.New("Your encryptionMasterKey is not of the correct format")
-		}
-	}
-	payload, err := encodeTriggerBatchBody(batch, c.EncryptionMasterKey)
+
+	payload, err := encodeTriggerBatchBody(batch)
 	if err != nil {
 		return err
 	}
@@ -430,16 +404,7 @@ func (c *Client) authenticateChannel(params []byte, member *MemberData) (respons
 		stringToSign = strings.Join([]string{stringToSign, jsonUserData}, ":")
 	}
 
-	var _response map[string]string
-
-	if isEncryptedChannel(channelName) {
-		sharedSecret := generateSharedSecret(channelName, c.EncryptionMasterKey)
-		sharedSecretB64 := base64.StdEncoding.EncodeToString(sharedSecret[:])
-		_response = createAuthMap(c.Key, c.Secret, stringToSign, sharedSecretB64)
-	} else {
-		_response = createAuthMap(c.Key, c.Secret, stringToSign, "")
-	}
-
+	_response := createAuthMap(c.Key, c.Secret, stringToSign)
 	if member != nil {
 		_response["channel_data"] = jsonUserData
 	}
@@ -478,12 +443,7 @@ error will be passed.
 func (c *Client) Webhook(header http.Header, body []byte) (*Webhook, error) {
 	for _, token := range header["X-Pusher-Key"] {
 		if token == c.Key && checkSignature(header.Get("X-Pusher-Signature"), c.Secret, body) {
-			unmarshalledWebhooks, err := unmarshalledWebhook(body)
-			if err != nil {
-				return unmarshalledWebhooks, err
-			}
-			decryptedWebhooks, err := decryptEvents(*unmarshalledWebhooks, c.EncryptionMasterKey)
-			return decryptedWebhooks, err
+			return unmarshalledWebhook(body)
 		}
 	}
 	return nil, errors.New("Invalid webhook")

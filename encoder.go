@@ -26,17 +26,13 @@ type eventPayload struct {
 	SocketID *string  `json:"socket_id,omitempty"`
 }
 
-func encodeTriggerBody(channels []string, event string, data interface{}, socketID *string, encryptionKey string) ([]byte, error) {
+func encodeTriggerBody(channels []string, event string, data interface{}, socketID *string) ([]byte, error) {
 	dataBytes, err := encodeEventData(data)
 	if err != nil {
 		return nil, err
 	}
-	var payloadData string
-	if isEncryptedChannel(channels[0]) {
-		payloadData = encrypt(channels[0], dataBytes, encryptionKey)
-	} else {
-		payloadData = string(dataBytes)
-	}
+
+	payloadData := string(dataBytes)
 	if len(payloadData) > maxEventPayloadSize {
 		return nil, errors.New("Data must be smaller than 10kb")
 	}
@@ -48,19 +44,15 @@ func encodeTriggerBody(channels []string, event string, data interface{}, socket
 	})
 }
 
-func encodeTriggerBatchBody(batch []Event, encryptionKey string) ([]byte, error) {
+func encodeTriggerBatchBody(batch []Event) ([]byte, error) {
 	batchEvents := make([]batchEvent, len(batch))
 	for idx, e := range batch {
-		var stringifyedDataBytes string
 		dataBytes, err := encodeEventData(e.Data)
 		if err != nil {
 			return nil, err
 		}
-		if isEncryptedChannel(e.Channel) {
-			stringifyedDataBytes = encrypt(e.Channel, dataBytes, encryptionKey)
-		} else {
-			stringifyedDataBytes = string(dataBytes)
-		}
+
+		stringifyedDataBytes := string(dataBytes)
 		if len(stringifyedDataBytes) > maxEventPayloadSize {
 			return nil, fmt.Errorf("Data of the event #%d in batch, must be smaller than 10kb", idx)
 		}

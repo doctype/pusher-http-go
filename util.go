@@ -5,7 +5,6 @@ import (
 	"net/url"
 	"regexp"
 	"strconv"
-	"strings"
 	"time"
 )
 
@@ -45,17 +44,6 @@ func channelsAreValid(channels []string) bool {
 		}
 	}
 	return true
-}
-
-func isEncryptedChannel(channel string) bool {
-	if strings.HasPrefix(channel, "private-encrypted-") {
-		return true
-	}
-	return false
-}
-
-func validEncryptionKey(encryptionKey string) bool {
-	return len(encryptionKey) == 32
 }
 
 func validateSocketID(socketID *string) (err error) {
